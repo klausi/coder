@@ -155,7 +155,7 @@ class ScopeIndentSniff implements Sniff
 
         $lastOpenTag     = $stackPtr;
         $lastCloseTag    = null;
-        $openScopes      = [];
+        $openScopes      = new OpenScopes();
         $adjustments     = [];
         $setIndents      = [];
         $disableExactEnd = 0;
@@ -618,18 +618,22 @@ class ScopeIndentSniff implements Sniff
 
             // Scope closers reset the required indent to the same level as the opening condition.
             if (($checkToken !== null
-                && isset($openScopes[$checkToken]) === true
+                && $openScopes->isSet($checkToken) === true
                 || (isset($tokens[$checkToken]['scope_condition']) === true
                 && isset($tokens[$checkToken]['scope_closer']) === true
                 && $tokens[$checkToken]['scope_closer'] === $checkToken
                 && $tokens[$checkToken]['line'] !== $tokens[$tokens[$checkToken]['scope_opener']]['line']))
                 || ($checkToken === null
-                && isset($openScopes[$i]) === true
+                && $openScopes->isSet($i) === true
                 || (isset($tokens[$i]['scope_condition']) === true
                 && isset($tokens[$i]['scope_closer']) === true
                 && $tokens[$i]['scope_closer'] === $i
                 && $tokens[$i]['line'] !== $tokens[$tokens[$i]['scope_opener']]['line']))
             ) {
+                //print_r($openScopes);
+                /*foreach ($openScopes as $scope) {
+                    print_r($tokens[$scope]);
+                }*/
                 if ($this->debug === true) {
                     if ($checkToken === null) {
                         $type = $tokens[$tokens[$i]['scope_condition']]['type'];
@@ -647,15 +651,17 @@ class ScopeIndentSniff implements Sniff
                     $scopeCloser = $i;
                 }
 
-                $conditionToken = array_pop($openScopes);
+                $conditionToken = $openScopes->removeLast();
                 if ($this->debug === true) {
                     $line = $tokens[$conditionToken]['line'];
                     $type = $tokens[$conditionToken]['type'];
                     echo "\t=> removed open scope $conditionToken ($type) on line $line".PHP_EOL;
                 }
 
-                if (isset($tokens[$scopeCloser]['scope_condition']) === true) {
-                    $first = $phpcsFile->findFirstOnLine([T_WHITESPACE, T_INLINE_HTML], $tokens[$scopeCloser]['scope_condition'], true);
+                if ($conditionToken !== null) {
+                    //print_r($tokens[$conditionToken]);
+                    //print_r($tokens[$tokens[$scopeCloser]['scope_condition']]);
+                    $first = $phpcsFile->findFirstOnLine([T_WHITESPACE, T_INLINE_HTML], $conditionToken, true);
                     if ($this->debug === true) {
                         $line = $tokens[$first]['line'];
                         $type = $tokens[$first]['type'];
@@ -685,6 +691,10 @@ class ScopeIndentSniff implements Sniff
                         echo "\t=> indent set to $currentIndent by token $scopeCloser ($type)".PHP_EOL;
                     }
 
+                    if ($conditionToken !== $tokens[$scopeCloser]['scope_condition']) {
+                        //$checkIndent = $currentIndent + $this->indent;
+                    }
+
                     // We only check the indent of scope closers if they are
                     // curly braces because other constructs tend to have different rules.
                     if ($tokens[$scopeCloser]['code'] === T_CLOSE_CURLY_BRACKET) {
@@ -695,113 +705,6 @@ class ScopeIndentSniff implements Sniff
                 }//end if
             }//end if
 
-            // Handle scope for JS object notation.
-            if ($phpcsFile->tokenizerType === 'JS'
-                && (($checkToken !== null
-                && $tokens[$checkToken]['code'] === T_CLOSE_OBJECT
-                && $tokens[$checkToken]['line'] !== $tokens[$tokens[$checkToken]['bracket_opener']]['line'])
-                || ($checkToken === null
-                && $tokens[$i]['code'] === T_CLOSE_OBJECT
-                && $tokens[$i]['line'] !== $tokens[$tokens[$i]['bracket_opener']]['line']))
-            ) {
-                if ($this->debug === true) {
-                    $line = $tokens[$i]['line'];
-                    echo "Close JS object on line $line".PHP_EOL;
-                }
-
-                $scopeCloser = $checkToken;
-                if ($scopeCloser === null) {
-                    $scopeCloser = $i;
-                } else {
-                    $conditionToken = array_pop($openScopes);
-                    if ($this->debug === true) {
-                        $line = $tokens[$conditionToken]['line'];
-                        $type = $tokens[$conditionToken]['type'];
-                        echo "\t=> removed open scope $conditionToken ($type) on line $line".PHP_EOL;
-                    }
-                }
-
-                $parens = 0;
-                if (isset($tokens[$scopeCloser]['nested_parenthesis']) === true
-                    && empty($tokens[$scopeCloser]['nested_parenthesis']) === false
-                ) {
-                    $parens = $tokens[$scopeCloser]['nested_parenthesis'];
-                    end($parens);
-                    $parens = key($parens);
-                    if ($this->debug === true) {
-                        $line = $tokens[$parens]['line'];
-                        echo "\t* token has nested parenthesis $parens on line $line *".PHP_EOL;
-                    }
-                }
-
-                $condition = 0;
-                if (isset($tokens[$scopeCloser]['conditions']) === true
-                    && empty($tokens[$scopeCloser]['conditions']) === false
-                ) {
-                    $condition = $tokens[$scopeCloser]['conditions'];
-                    end($condition);
-                    $condition = key($condition);
-                    if ($this->debug === true) {
-                        $line = $tokens[$condition]['line'];
-                        $type = $tokens[$condition]['type'];
-                        echo "\t* token is inside condition $condition ($type) on line $line *".PHP_EOL;
-                    }
-                }
-
-                if ($parens > $condition) {
-                    if ($this->debug === true) {
-                        echo "\t* using parenthesis *".PHP_EOL;
-                    }
-
-                    $first     = $phpcsFile->findFirstOnLine(T_WHITESPACE, $parens, true);
-                    $condition = 0;
-                } else if ($condition > 0) {
-                    if ($this->debug === true) {
-                        echo "\t* using condition *".PHP_EOL;
-                    }
-
-                    $first  = $phpcsFile->findFirstOnLine(T_WHITESPACE, $condition, true);
-                    $parens = 0;
-                } else {
-                    if ($this->debug === true) {
-                        $line = $tokens[$tokens[$scopeCloser]['bracket_opener']]['line'];
-                        echo "\t* token is not in parenthesis or condition; using opener on line $line *".PHP_EOL;
-                    }
-
-                    $first = $phpcsFile->findFirstOnLine(T_WHITESPACE, $tokens[$scopeCloser]['bracket_opener'], true);
-                }//end if
-
-                $currentIndent = ($tokens[$first]['column'] - 1);
-                if (isset($adjustments[$first]) === true) {
-                    $currentIndent += $adjustments[$first];
-                }
-
-                if ($parens > 0 || $condition > 0) {
-                    $checkIndent = ($tokens[$first]['column'] - 1);
-                    if (isset($adjustments[$first]) === true) {
-                        $checkIndent += $adjustments[$first];
-                    }
-
-                    if ($condition > 0) {
-                        $checkIndent   += $this->indent;
-                        $currentIndent += $this->indent;
-                        $exact          = true;
-                    }
-                } else {
-                    $checkIndent = $currentIndent;
-                }
-
-                // Make sure it is divisible by our expected indent.
-                $currentIndent      = (int) (ceil($currentIndent / $this->indent) * $this->indent);
-                $checkIndent        = (int) (ceil($checkIndent / $this->indent) * $this->indent);
-                $setIndents[$first] = $currentIndent;
-
-                if ($this->debug === true) {
-                    $type = $tokens[$first]['type'];
-                    echo "\t=> checking indent of $checkIndent; main indent set to $currentIndent by token $first ($type)".PHP_EOL;
-                }
-            }//end if
-
             if ($checkToken !== null
                 && isset(Tokens::$scopeOpeners[$tokens[$checkToken]['code']]) === true
                 && in_array($tokens[$checkToken]['code'], $this->nonIndentingScopes, true) === false
@@ -809,10 +712,10 @@ class ScopeIndentSniff implements Sniff
             ) {
                 $exact = true;
 
-                $lastOpener = null;
-                if (empty($openScopes) === false) {
-                    end($openScopes);
-                    $lastOpener = current($openScopes);
+                $lastOpener = $openScopes->getLastOpener();
+                if ($lastOpener !== null) {
+                    //print_r($tokens[$lastOpener]);
+                    //print_r($tokens[$checkToken]);
                 }
 
                 // A scope opener that shares a closer with another token (like multiple
@@ -1164,7 +1067,7 @@ class ScopeIndentSniff implements Sniff
                 }
 
                 $currentIndent = (($tokens[$first]['column'] - 1) + $this->indent);
-                $openScopes[$tokens[$i]['scope_closer']] = $tokens[$i]['scope_condition'];
+                $openScopes->add($tokens[$i]['scope_closer'], $tokens[$i]['scope_condition']);
                 if ($this->debug === true) {
                     $closerToken    = $tokens[$i]['scope_closer'];
                     $closerLine     = $tokens[$closerToken]['line'];
@@ -1221,7 +1124,12 @@ class ScopeIndentSniff implements Sniff
 
                     $currentIndent += $this->indent;
                     $setIndents[$i] = $currentIndent;
-                    $openScopes[$tokens[$i]['scope_closer']] = $tokens[$i]['scope_condition'];
+                    $openScopes->add($tokens[$i]['scope_closer'], $tokens[$i]['scope_condition']);
+                    /*print_r($tokens[$tokens[$i]['scope_closer']]);
+                    print_r($openScopes);
+                    foreach ($openScopes as $scope) {
+                        print_r($tokens[$scope]);
+                    }*/
                     if ($this->debug === true) {
                         $closerToken    = $tokens[$i]['scope_closer'];
                         $closerLine     = $tokens[$closerToken]['line'];
@@ -1527,3 +1435,40 @@ class ScopeIndentSniff implements Sniff
 
 
 }//end class
+
+class OpenScopes {
+
+    private $openScopes = [];
+
+    public function add($closer, $opener) {
+        $this->openScopes[$closer][] = $opener;
+    }
+
+    public function isSet($closer) {
+        return isset($this->openScopes[$closer]);
+    }
+
+    public function removeLast() {
+        if (empty($this->openScopes)) {
+            return null;
+        }
+        end($this->openScopes);
+        $lastKey = key($this->openScopes);
+        $last = array_pop($this->openScopes);
+        $removed = array_pop($last);
+        if (empty($last) === false) {
+            $this->openScopes[$lastKey] = $last;
+        }
+        return $removed;
+    }
+
+    public function getLastOpener() {
+        if (empty($this->openScopes)) {
+            return null;
+        }
+        end($this->openScopes);
+        $last = current($this->openScopes);
+        end($last);
+        return current($last);
+    }
+}
