@@ -101,7 +101,7 @@ class EndFileNewlineSniff implements Sniff
         }
 
         $lastCodeLine = $tokens[$lastCode]['line'];
-        $blankLines   = ($lastLine - $lastCodeLine + 1);
+        $blankLines   = (string) ($lastLine - $lastCodeLine + 1);
         $phpcsFile->recordMetric($stackPtr, 'Number of newlines at EOF', $blankLines);
 
         if ($blankLines > 1) {

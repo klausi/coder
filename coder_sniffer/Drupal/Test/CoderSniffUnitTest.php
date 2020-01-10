@@ -88,9 +88,9 @@ abstract class CoderSniffUnitTest extends TestCase
      *
      * @param string $testFileBase The base path that the unit tests files will have.
      *
-     * @return string[]
+     * @return array<string>
      */
-    protected function getTestFiles($testFileBase)
+    protected function getTestFiles($testFileBase): array
     {
         $testFiles = [];
 
